@@ -96,6 +96,7 @@ function M.start()
       end
 
       if jump_to then
+        vim.cmd("normal! m'")
         api.nvim_win_set_cursor(win, jump_to)
       end
 
@@ -103,6 +104,7 @@ function M.start()
     elseif char == BS or char == CTRL_H then
       chars = chars:sub(1, #chars - 1)
     elseif jump_to then
+      vim.cmd("normal! m'")
       api.nvim_win_set_cursor(win, jump_to)
       break
     else
