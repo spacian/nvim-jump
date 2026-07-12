@@ -17,6 +17,9 @@ local CONFIG = {
 
   -- The highlight group to use for labels.
   label = 'FlashLabel',
+
+  -- Automatically jump if there is only a single match.
+  auto_jump = false,
 }
 
 local function search(pattern, lines, start_line, matches)
@@ -117,6 +120,15 @@ function M.start()
 
     if #chars > 0 then
       search(chars, lines, top, matches)
+
+      if CONFIG.auto_jump and #matches == 1 then
+        vim.cmd("normal! m'")
+        api.nvim_win_set_cursor(win, {
+          matches[1].line + 1,
+          matches[1].start_col,
+        })
+        break
+      end
 
       local avail = available_labels(lines, matches)
 

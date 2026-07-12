@@ -86,6 +86,9 @@ The following settings are available (along with their defaults):
 
   -- The highlight group to use for labels.
   label = 'FlashLabel',
+
+  -- Automatically jump if there is only a single match.
+  auto_jump = false,
 }
 ```
 
