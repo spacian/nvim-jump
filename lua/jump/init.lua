@@ -22,12 +22,14 @@ local CONFIG = {
   auto_jump = false,
 }
 
-local function search(pattern, lines, start_line, matches)
+local function search(pattern, window, matches)
+  local lines = window.lines
+  local start_line = window.top
   local lower = pattern == pattern:lower()
 
   for idx, line in ipairs(lines) do
     local lnum = start_line + idx - 1
-    local line = lower and line:lower() or line
+    line = lower and line:lower() or line
 
     if #line > 0 then
       local col = 1
@@ -41,17 +43,20 @@ local function search(pattern, lines, start_line, matches)
 
         col = stop + 1
         table.insert(matches, {
+          win = window.win,
+          buf = window.buf,
           line = lnum - 1,
           start_col = start - 1,
           end_col = stop,
           line_index = idx,
+          line_text = lines[idx],
         })
       end
     end
   end
 end
 
-local function available_labels(lines, matches)
+local function available_labels(matches)
   local avail = {}
 
   for _, char in ipairs(LABELS) do
@@ -62,7 +67,7 @@ local function available_labels(lines, matches)
   -- matched by the next input.
   for _, match in ipairs(matches) do
     local next_col = match.end_col + 1
-    local next_char = lines[match.line_index]:sub(next_col, next_col):lower()
+    local next_char = match.line_text:sub(next_col, next_col):lower()
 
     avail[next_char] = false
   end
@@ -70,13 +75,32 @@ local function available_labels(lines, matches)
   return avail
 end
 
+local function get_windows()
+  local windows = {}
+  for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+    local info = fn.getwininfo(win)[1]
+    -- Skip invalid windows
+    if info then
+      local buf = api.nvim_win_get_buf(win)
+      windows[#windows + 1] = {
+        win = win,
+        buf = buf,
+        top = info.topline,
+        bot = info.botline,
+        lines = api.nvim_buf_get_lines(
+          buf,
+          info.topline - 1,
+          info.botline,
+          true
+        ),
+      }
+    end
+  end
+  return windows
+end
+
 function M.start()
-  local win = api.nvim_get_current_win()
-  local buf = api.nvim_win_get_buf(win)
-  local info = fn.getwininfo(win)[1]
-  local top = info.topline
-  local bot = info.botline
-  local lines = api.nvim_buf_get_lines(buf, top - 1, bot, true)
+  local windows = get_windows()
   local chars = ''
   local matches = {}
   local active = {}
@@ -90,9 +114,8 @@ function M.start()
     if char == ESC then
       break
     elseif char == CR then
-      for _, char in ipairs(LABELS) do
-        jump_to = active[char]
-
+      for _, label in ipairs(LABELS) do
+        jump_to = active[label]
         if jump_to then
           break
         end
@@ -100,7 +123,8 @@ function M.start()
 
       if jump_to then
         vim.cmd("normal! m'")
-        api.nvim_win_set_cursor(win, jump_to)
+        api.nvim_set_current_win(jump_to.win)
+        api.nvim_win_set_cursor(jump_to.win, jump_to.pos)
       end
 
       break
@@ -108,7 +132,8 @@ function M.start()
       chars = chars:sub(1, #chars - 1)
     elseif jump_to then
       vim.cmd("normal! m'")
-      api.nvim_win_set_cursor(win, jump_to)
+      api.nvim_set_current_win(jump_to.win)
+      api.nvim_win_set_cursor(jump_to.win, jump_to.pos)
       break
     else
       chars = chars .. char
@@ -116,21 +141,25 @@ function M.start()
 
     matches = {}
     active = {}
-    api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+    for _, window in ipairs(windows) do
+      api.nvim_buf_clear_namespace(window.buf, NS, 0, -1)
+    end
 
     if #chars > 0 then
-      search(chars, lines, top, matches)
+      for _, window in ipairs(windows) do
+        search(chars, window, matches)
+      end
 
       if CONFIG.auto_jump and #matches == 1 then
         vim.cmd("normal! m'")
-        api.nvim_win_set_cursor(win, {
+        api.nvim_win_set_cursor(matches[1].win, {
           matches[1].line + 1,
           matches[1].start_col,
         })
         break
       end
 
-      local avail = available_labels(lines, matches)
+      local avail = available_labels(matches)
 
       for _, match in ipairs(matches) do
         local label = nil
@@ -144,7 +173,7 @@ function M.start()
         end
 
         vim.hl.range(
-          buf,
+          match.buf,
           NS,
           CONFIG.search,
           { match.line, match.start_col },
@@ -153,8 +182,11 @@ function M.start()
         )
 
         if label then
-          active[label] = { match.line + 1, match.start_col }
-          api.nvim_buf_set_extmark(buf, NS, match.line, match.start_col, {
+          active[label] = {
+            win = match.win,
+            pos = { match.line + 1, match.start_col },
+          }
+          api.nvim_buf_set_extmark(match.buf, NS, match.line, match.start_col, {
             virt_text = { { label, CONFIG.label } },
             virt_text_pos = 'overlay',
             priority = 201,
@@ -166,7 +198,9 @@ function M.start()
     vim.cmd.redraw()
   end
 
-  api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+  for _, window in ipairs(windows) do
+    api.nvim_buf_clear_namespace(window.buf, NS, 0, -1)
+  end
   api.nvim_echo({ { '', '' } }, false, {})
   vim.cmd.redraw()
 end
